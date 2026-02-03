@@ -237,12 +237,31 @@ def generate_speech(
 
     if stream:
         # If streaming, outputs is a generator
+        buffer = []
+        buffer_size = 0
+        target_buffer_size = 24000  # 1 second of audio at 24kHz
+
         for chunk in outputs:
             # Convert to numpy
             if isinstance(chunk, torch.Tensor):
                 chunk = chunk.cpu().float().numpy()
             chunk = chunk.squeeze()
-            yield (24000, chunk)
+
+            # Accumulate in buffer
+            buffer.append(chunk)
+            buffer_size += chunk.size if chunk.ndim > 0 else 1
+
+            # Yield if buffer is large enough
+            if buffer_size >= target_buffer_size:
+                concatenated = np.concatenate(buffer)
+                yield (24000, concatenated)
+                buffer = []
+                buffer_size = 0
+
+        # Yield remaining buffer
+        if buffer:
+            concatenated = np.concatenate(buffer)
+            yield (24000, concatenated)
     else:
         # Non-streaming fallback
         if not outputs.speech_outputs or outputs.speech_outputs[0] is None:
