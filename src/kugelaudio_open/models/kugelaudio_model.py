@@ -29,6 +29,7 @@ from .diffusion_head import KugelAudioDiffusionHead
 from ..schedule.dpm_solver import DPMSolverMultistepScheduler
 
 from ..configs import KugelAudioConfig
+from ..utils.device import get_device_obj
 
 
 logger = logging.get_logger(__name__)
@@ -238,7 +239,7 @@ class KugelAudioModel(KugelAudioPreTrainedModel):
             elif cache_position is not None:
                 device = cache_position.device
             else:
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                device = get_device_obj()
         
         min_dtype = torch.finfo(dtype).min
         

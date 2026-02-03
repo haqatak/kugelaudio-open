@@ -16,6 +16,8 @@ import warnings
 import numpy as np
 import torch
 
+from ..utils.device import get_device
+
 # Try to import AudioSeal
 try:
     from audioseal import AudioSeal
@@ -77,7 +79,7 @@ class AudioWatermark:
         message: Optional[torch.Tensor] = None,
     ):
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = get_device()
         self.device = torch.device(device)
         
         self._generator = None

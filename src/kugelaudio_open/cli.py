@@ -60,9 +60,10 @@ Examples:
         import torch
         from kugelaudio_open.models import KugelAudioForConditionalGenerationInference
         from kugelaudio_open.processors import KugelAudioProcessor
+        from kugelaudio_open.utils.device import get_device, get_optimal_dtype
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.bfloat16 if device == "cuda" else torch.float32
+        device = get_device()
+        dtype = get_optimal_dtype(device)
 
         print(f"Loading model {args.model}...")
         model = KugelAudioForConditionalGenerationInference.from_pretrained(

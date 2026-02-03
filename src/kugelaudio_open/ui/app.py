@@ -8,6 +8,8 @@ from typing import Optional, Tuple
 import numpy as np
 import torch
 
+from ..utils.device import get_device, get_optimal_dtype, empty_cache
+
 try:
     import gradio as gr
 
@@ -22,15 +24,6 @@ _model = None
 _processor = None
 _watermark = None
 _current_model_id = None  # Track which model is loaded
-
-
-def get_device():
-    """Get the best available device."""
-    if torch.cuda.is_available():
-        return "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
 
 
 def _warmup_model(model, processor=None):
@@ -86,8 +79,7 @@ def _warmup_model(model, processor=None):
             _ = model.generate(**dummy_inputs, cfg_scale=3.0, max_new_tokens=10, show_progress=False)
         
     # Clear memory
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    empty_cache(device)
 
 
 def load_models(model_id: str = "kugelaudio/kugelaudio-0-open"):
@@ -99,7 +91,7 @@ def load_models(model_id: str = "kugelaudio/kugelaudio-0-open"):
     from kugelaudio_open.watermark import AudioWatermark
 
     device = get_device()
-    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    dtype = get_optimal_dtype(device)
 
     # Check if we need to load a different model
     if _model is None or _current_model_id != model_id:
@@ -111,8 +103,7 @@ def load_models(model_id: str = "kugelaudio/kugelaudio-0-open"):
             _model = None
             _processor = None
             # Clear CUDA cache to free memory
-            if device == "cuda":
-                torch.cuda.empty_cache()
+            empty_cache(device)
         
         print(f"Loading model {model_id} on {device}...")
         try:
