@@ -147,6 +147,7 @@ def generate_speech(
     cfg_scale: float = 3.0,
     max_tokens: int = 2048,
     stream: bool = True,
+    seed: int = 42,
 ) -> Iterator[Tuple[int, np.ndarray]]:
     """Generate speech from text.
 
@@ -157,6 +158,7 @@ def generate_speech(
         cfg_scale: Classifier-free guidance scale
         max_tokens: Maximum generation tokens
         stream: Whether to stream output
+        seed: Random seed for generation
 
     Returns:
         Generator yielding (sample_rate, audio_array) tuples
@@ -220,19 +222,26 @@ def generate_speech(
         voice_audio = ref_audio
         print(f"[Voice Cloning] Final voice audio: shape={voice_audio.shape}, min={voice_audio.min():.4f}, max={voice_audio.max():.4f}, std={voice_audio.std():.4f}")
 
+    # Set seed
+    if seed != -1:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     # Process text input with optional voice prompt
     inputs = processor(text=text.strip(), voice_prompt=voice_audio, return_tensors="pt")
     inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
 
-    print(f"[Generation] Using model: {model_id}, cfg_scale={cfg_scale}, max_tokens={max_tokens}, stream={stream}")
+    print(f"[Generation] Using model: {model_id}, cfg_scale={cfg_scale}, max_tokens={max_tokens}, stream={stream}, seed={seed}")
     
-    # Generate
+    # Generate (skip watermark for streamed chunks to avoid choppiness)
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
             cfg_scale=cfg_scale,
             max_new_tokens=max_tokens,
             stream=stream,
+            skip_watermark=stream,  # Skip watermark for streamed chunks
         )
 
     if stream:
@@ -399,6 +408,12 @@ def create_app() -> "gr.Blocks":
                                 value=True,
                                 info="Play audio as it is generated",
                             )
+                            seed = gr.Number(
+                                label="Random Seed",
+                                value=42,
+                                precision=0,
+                                info="Set to -1 for random",
+                            )
 
                         generate_btn = gr.Button("🎤 Generate Speech", variant="primary", size="lg")
 
@@ -422,7 +437,7 @@ def create_app() -> "gr.Blocks":
 
                 generate_btn.click(
                     fn=generate_speech,
-                    inputs=[text_input, reference_audio, model_choice, cfg_scale, max_tokens, stream_chk],
+                    inputs=[text_input, reference_audio, model_choice, cfg_scale, max_tokens, stream_chk, seed],
                     outputs=[output_audio],
                 )
 
