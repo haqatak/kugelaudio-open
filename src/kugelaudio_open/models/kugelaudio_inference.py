@@ -370,8 +370,9 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
         do_sample: bool = False,
         temperature: float = 1.0,
         show_progress: bool = True,
+        stream: bool = False,
         **kwargs,
-    ) -> KugelAudioGenerationOutput:
+    ) -> Union[KugelAudioGenerationOutput, Any]:
         """Generate speech from text.
 
         Args:
@@ -387,10 +388,58 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
             do_sample: Whether to sample or use greedy decoding
             temperature: Sampling temperature
             show_progress: Whether to show progress bar
+            stream: Whether to yield audio chunks as they are generated
 
         Returns:
-            KugelAudioGenerationOutput with sequences and speech_outputs
+            KugelAudioGenerationOutput or a generator yielding audio chunks if stream=True
         """
+        iterator = self._generate_iterator(
+            text_ids=text_ids,
+            input_ids=input_ids,
+            voice_prompt=voice_prompt,
+            voice_cache=voice_cache,
+            speech_tensors=speech_tensors,
+            speech_masks=speech_masks,
+            speech_input_mask=speech_input_mask,
+            cfg_scale=cfg_scale,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature,
+            show_progress=show_progress,
+            stream=stream,
+            **kwargs
+        )
+
+        if stream:
+            return iterator
+
+        output = None
+        while True:
+            try:
+                next(iterator)
+            except StopIteration as e:
+                output = e.value
+                break
+
+        return output
+
+    def _generate_iterator(
+        self,
+        text_ids: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        voice_prompt: Optional[torch.Tensor] = None,
+        voice_cache: Optional[dict] = None,
+        speech_tensors: Optional[torch.Tensor] = None,
+        speech_masks: Optional[torch.Tensor] = None,
+        speech_input_mask: Optional[torch.Tensor] = None,
+        cfg_scale: float = 3.0,
+        max_new_tokens: int = 2048,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        show_progress: bool = True,
+        stream: bool = False,
+        **kwargs,
+    ) -> Union[KugelAudioGenerationOutput, Any]:
         device = next(self.parameters()).device
         dtype = next(self.parameters()).dtype
 
@@ -663,7 +712,22 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
                 # Store audio chunks
                 for i, idx in enumerate(diffusion_indices.tolist()):
                     if not finished[idx]:
-                        audio_chunks[idx].append(audio[i].cpu())
+                        chunk = audio[i].cpu()
+                        audio_chunks[idx].append(chunk)
+
+                        # If streaming, yield the chunk for the first sample
+                        # (Watermarking logic for small chunks is simplified: apply to chunk directly)
+                        if stream and idx == 0:
+                            # Normalize chunk
+                            max_val = chunk.abs().max()
+                            if max_val > 1.0:
+                                chunk = chunk * (0.95 / max_val)
+
+                            # Apply watermark to the chunk
+                            # Note: Watermarking short chunks may have artifacts or reduce detection reliability,
+                            # but ensures all output is watermarked.
+                            chunk_wm = self._apply_watermark(chunk.unsqueeze(0), sample_rate=24000).squeeze(0)
+                            yield chunk_wm
 
                 # Encode audio to semantic features with streaming cache
                 semantic_output = self.semantic_tokenizer.encode(
