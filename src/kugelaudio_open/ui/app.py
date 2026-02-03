@@ -3,7 +3,7 @@
 import os
 import tempfile
 import warnings
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Iterator
 
 import numpy as np
 import torch
@@ -146,7 +146,8 @@ def generate_speech(
     model_choice: str = "kugelaudio-0-open",
     cfg_scale: float = 3.0,
     max_tokens: int = 2048,
-) -> Tuple[int, np.ndarray]:
+    stream: bool = True,
+) -> Iterator[Tuple[int, np.ndarray]]:
     """Generate speech from text.
 
     Args:
@@ -155,9 +156,10 @@ def generate_speech(
         model_choice: Model variant to use
         cfg_scale: Classifier-free guidance scale
         max_tokens: Maximum generation tokens
+        stream: Whether to stream output
 
     Returns:
-        Tuple of (sample_rate, audio_array)
+        Generator yielding (sample_rate, audio_array) tuples
         
     Note:
         All generated audio is automatically watermarked for identification.
@@ -222,7 +224,7 @@ def generate_speech(
     inputs = processor(text=text.strip(), voice_prompt=voice_audio, return_tensors="pt")
     inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
 
-    print(f"[Generation] Using model: {model_id}, cfg_scale={cfg_scale}, max_tokens={max_tokens}")
+    print(f"[Generation] Using model: {model_id}, cfg_scale={cfg_scale}, max_tokens={max_tokens}, stream={stream}")
     
     # Generate
     with torch.no_grad():
@@ -230,32 +232,43 @@ def generate_speech(
             **inputs,
             cfg_scale=cfg_scale,
             max_new_tokens=max_tokens,
+            stream=stream,
         )
 
-    if not outputs.speech_outputs or outputs.speech_outputs[0] is None:
-        raise gr.Error("Generation failed. Please try again with different settings.")
+    if stream:
+        # If streaming, outputs is a generator
+        for chunk in outputs:
+            # Convert to numpy
+            if isinstance(chunk, torch.Tensor):
+                chunk = chunk.cpu().float().numpy()
+            chunk = chunk.squeeze()
+            yield (24000, chunk)
+    else:
+        # Non-streaming fallback
+        if not outputs.speech_outputs or outputs.speech_outputs[0] is None:
+            raise gr.Error("Generation failed. Please try again with different settings.")
 
-    # Audio is already watermarked by the model's generate method
-    audio = outputs.speech_outputs[0]
-    print(f"[Generation] Raw output: shape={audio.shape}, dtype={audio.dtype}")
+        # Audio is already watermarked by the model's generate method
+        audio = outputs.speech_outputs[0]
+        print(f"[Generation] Raw output: shape={audio.shape}, dtype={audio.dtype}")
 
-    # Convert to numpy (convert to float32 first since numpy doesn't support bfloat16)
-    if isinstance(audio, torch.Tensor):
-        audio = audio.cpu().float().numpy()
+        # Convert to numpy (convert to float32 first since numpy doesn't support bfloat16)
+        if isinstance(audio, torch.Tensor):
+            audio = audio.cpu().float().numpy()
 
-    # Ensure correct shape (1D array)
-    audio = audio.squeeze()
-    
-    # Normalize to prevent clipping (important for Gradio playback)
-    max_val = np.abs(audio).max()
-    if max_val > 1.0:
-        audio = audio / max_val * 0.95
-    
-    print(f"[Generation] Final output: shape={audio.shape}, dtype={audio.dtype}, duration={len(audio)/24000:.2f}s")
-    print(f"[Generation] Audio stats: min={audio.min():.4f}, max={audio.max():.4f}, std={audio.std():.4f}")
+        # Ensure correct shape (1D array)
+        audio = audio.squeeze()
 
-    # Return with explicit sample rate - Gradio expects (sample_rate, audio_array)
-    return (24000, audio)
+        # Normalize to prevent clipping (important for Gradio playback)
+        max_val = np.abs(audio).max()
+        if max_val > 1.0:
+            audio = audio / max_val * 0.95
+
+        print(f"[Generation] Final output: shape={audio.shape}, dtype={audio.dtype}, duration={len(audio)/24000:.2f}s")
+        print(f"[Generation] Audio stats: min={audio.min():.4f}, max={audio.max():.4f}, std={audio.std():.4f}")
+
+        # Return with explicit sample rate - Gradio expects (sample_rate, audio_array)
+        yield (24000, audio)
 
 
 def check_watermark(audio: Tuple[int, np.ndarray]) -> str:
@@ -294,13 +307,19 @@ def create_app() -> "gr.Blocks":
         "https://hpi.de/fileadmin/_processed_/a/3/csm_BMFTR_de_Web_RGB_gef_durch_cd1f5345bd.jpg"
     )
 
+    device_name = get_device().upper()
+    device_color = "green" if device_name in ["CUDA", "MPS"] else "orange"
+
     with gr.Blocks(title="KugelAudio - Text to Speech") as app:
         gr.HTML(
             f"""
         <div style="text-align: center; margin-bottom: 1.5rem;">
             <h1 style="margin-bottom: 0.5rem;">🎙️ KugelAudio</h1>
             <p style="color: #666; margin-bottom: 1rem;">Open-source text-to-speech with voice cloning capabilities</p>
-            <div style="display: flex; justify-content: center; align-items: center; gap: 2rem; flex-wrap: wrap;">
+            <p style="font-size: 0.8rem; margin-top: 0.5rem;">
+                Running on: <span style="font-weight: bold; color: {device_color};">{device_name}</span>
+            </p>
+            <div style="display: flex; justify-content: center; align-items: center; gap: 2rem; flex-wrap: wrap; margin-top: 1rem;">
                 <a href="https://kugelaudio.com" target="_blank">
                     <img src="{kugelaudio_logo}" alt="KugelAudio" style="height: 50px; width: auto;">
                 </a>
@@ -356,6 +375,11 @@ def create_app() -> "gr.Blocks":
                                 label="Max Tokens",
                                 info="Maximum generation length",
                             )
+                            stream_chk = gr.Checkbox(
+                                label="Stream Output",
+                                value=True,
+                                info="Play audio as it is generated",
+                            )
 
                         generate_btn = gr.Button("🎤 Generate Speech", variant="primary", size="lg")
 
@@ -364,6 +388,8 @@ def create_app() -> "gr.Blocks":
                             label="Generated Speech",
                             type="numpy",
                             interactive=False,
+                            autoplay=True,
+                            streaming=True,
                         )
 
                         gr.Markdown(
@@ -377,7 +403,7 @@ def create_app() -> "gr.Blocks":
 
                 generate_btn.click(
                     fn=generate_speech,
-                    inputs=[text_input, reference_audio, model_choice, cfg_scale, max_tokens],
+                    inputs=[text_input, reference_audio, model_choice, cfg_scale, max_tokens, stream_chk],
                     outputs=[output_audio],
                 )
 
