@@ -3,6 +3,8 @@
 from typing import Optional, Union, Tuple
 import torch
 
+from .device import get_device, get_optimal_dtype
+
 
 def load_model_and_processor(
     model_name_or_path: str = "kugelaudio/kugelaudio-0-open",
@@ -29,11 +31,11 @@ def load_model_and_processor(
     
     # Auto-detect device
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = get_device()
     
     # Auto-detect dtype
     if torch_dtype is None:
-        torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        torch_dtype = get_optimal_dtype(device)
     
     # Load model
     attn_impl = "flash_attention_2" if use_flash_attention else "sdpa"
