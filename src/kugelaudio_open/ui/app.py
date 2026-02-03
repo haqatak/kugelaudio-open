@@ -307,13 +307,19 @@ def create_app() -> "gr.Blocks":
         "https://hpi.de/fileadmin/_processed_/a/3/csm_BMFTR_de_Web_RGB_gef_durch_cd1f5345bd.jpg"
     )
 
+    device_name = get_device().upper()
+    device_color = "green" if device_name in ["CUDA", "MPS"] else "orange"
+
     with gr.Blocks(title="KugelAudio - Text to Speech") as app:
         gr.HTML(
             f"""
         <div style="text-align: center; margin-bottom: 1.5rem;">
             <h1 style="margin-bottom: 0.5rem;">🎙️ KugelAudio</h1>
             <p style="color: #666; margin-bottom: 1rem;">Open-source text-to-speech with voice cloning capabilities</p>
-            <div style="display: flex; justify-content: center; align-items: center; gap: 2rem; flex-wrap: wrap;">
+            <p style="font-size: 0.8rem; margin-top: 0.5rem;">
+                Running on: <span style="font-weight: bold; color: {device_color};">{device_name}</span>
+            </p>
+            <div style="display: flex; justify-content: center; align-items: center; gap: 2rem; flex-wrap: wrap; margin-top: 1rem;">
                 <a href="https://kugelaudio.com" target="_blank">
                     <img src="{kugelaudio_logo}" alt="KugelAudio" style="height: 50px; width: auto;">
                 </a>
