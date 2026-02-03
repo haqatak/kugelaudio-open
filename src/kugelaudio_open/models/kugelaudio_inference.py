@@ -371,6 +371,7 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
         temperature: float = 1.0,
         show_progress: bool = True,
         stream: bool = False,
+        skip_watermark: bool = False,
         **kwargs,
     ) -> Union[KugelAudioGenerationOutput, Any]:
         """Generate speech from text.
@@ -389,6 +390,7 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
             temperature: Sampling temperature
             show_progress: Whether to show progress bar
             stream: Whether to yield audio chunks as they are generated
+            skip_watermark: Whether to skip watermarking (useful for streaming previews)
 
         Returns:
             KugelAudioGenerationOutput or a generator yielding audio chunks if stream=True
@@ -407,6 +409,7 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
             temperature=temperature,
             show_progress=show_progress,
             stream=stream,
+            skip_watermark=skip_watermark,
             **kwargs
         )
 
@@ -438,6 +441,7 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
         temperature: float = 1.0,
         show_progress: bool = True,
         stream: bool = False,
+        skip_watermark: bool = False,
         **kwargs,
     ) -> Union[KugelAudioGenerationOutput, Any]:
         device = next(self.parameters()).device
@@ -723,11 +727,12 @@ class KugelAudioForConditionalGenerationInference(KugelAudioPreTrainedModel, Gen
                             if max_val > 1.0:
                                 chunk = chunk * (0.95 / max_val)
 
-                            # Apply watermark to the chunk
-                            # Note: Watermarking short chunks may have artifacts or reduce detection reliability,
-                            # but ensures all output is watermarked.
-                            chunk_wm = self._apply_watermark(chunk.unsqueeze(0), sample_rate=24000).squeeze(0)
-                            yield chunk_wm
+                            # Apply watermark to the chunk unless skipped
+                            if not skip_watermark:
+                                # Note: Watermarking short chunks may have artifacts or reduce detection reliability,
+                                # but ensures all output is watermarked.
+                                chunk = self._apply_watermark(chunk.unsqueeze(0), sample_rate=24000).squeeze(0)
+                            yield chunk
 
                 # Encode audio to semantic features with streaming cache
                 semantic_output = self.semantic_tokenizer.encode(
